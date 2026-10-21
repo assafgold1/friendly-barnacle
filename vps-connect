@@ -1,0 +1,58 @@
+#!/bin/bash
+# vps-connect — פותח את שער ה-OTP ב-VPS (otp-gate.ps1) כדי שאפשר יהיה להתחבר ב-RDP.
+#
+#   vps-connect          שולח קוד OTP לשער. אם שמרת secret — הקוד מחושב לבד, אחרת שואל אותך
+#   vps-connect setup    שומר את ה-secret ב-Keychain כדי לא להזדקק לטלפון
+#
+# הגדרות דרך משתני סביבה: VPS_HOST (חובה — כתובת השרת), VPS_GATE_PORT, VPS_RDP_FILE (קובץ .rdp לפתיחה אוטומטית)
+# לדוגמה, ב-~/.zshrc:  export VPS_HOST=1.2.3.4
+set -euo pipefail
+
+HOST="${VPS_HOST:?הגדר את כתובת השרת: export VPS_HOST=1.2.3.4}"
+GATE_PORT="${VPS_GATE_PORT:-47123}"
+RDP_FILE="${VPS_RDP_FILE:-}"
+SERVICE="vps-connect"
+
+if [[ "${1:-}" == "setup" ]]; then
+  read -rs -p "OTP secret (ה-Key שהסקריפט בשרת הציג): " secret; echo
+  security add-generic-password -U -s "$SERVICE" -a "$HOST" -w "${secret// /}"
+  echo "נשמר ב-Keychain."
+  exit 0
+fi
+
+totp() {
+  OTP_SECRET="$secret" python3 -I -c '
+import base64, hashlib, hmac, os, struct, time
+s = os.environ["OTP_SECRET"].replace(" ", "").upper()
+key = base64.b32decode(s + "=" * (-len(s) % 8))
+t = int(time.time())
+h = hmac.new(key, struct.pack(">Q", t // 30), hashlib.sha1).digest()
+o = h[-1] & 15
+code = (struct.unpack(">I", h[o:o + 4])[0] & 0x7FFFFFFF) % 1000000
+print(f"{code:06d} {30 - t % 30}")
+'
+}
+
+if secret=$(security find-generic-password -s "$SERVICE" -a "$HOST" -w 2>/dev/null); then
+  read -r code left < <(totp)
+  if (( left < 3 )); then sleep "$left"; read -r code left < <(totp); fi
+else
+  read -r -p "קוד מ-Google Authenticator: " code
+fi
+
+# בתוך subshell, כדי שכישלון חיבור לא יפיל את הסקריפט לפני שנדפיס הודעה ברורה
+reply=$( { exec 3<>"/dev/tcp/$HOST/$GATE_PORT" \
+           && printf '%s\n' "$code" >&3 \
+           && IFS= read -r -t 10 line <&3 \
+           && printf '%s' "$line"; } 2>/dev/null ) || true
+
+case "$reply" in
+  OK*)
+    echo "✓ השער פתוח ל-IP שלך ל-${reply#OK } דקות"
+    if [[ -n "$RDP_FILE" ]]; then open "$RDP_FILE"; else echo "עכשיו התחבר ב-Windows App."; fi
+    ;;
+  DENIED)  echo "✗ קוד שגוי או שכבר נוצל. חכה לקוד הבא ונסה שוב." >&2; exit 1 ;;
+  BLOCKED) echo "✗ יותר מדי קודים שגויים — השער חסום לכמה דקות." >&2; exit 1 ;;
+  "")      echo "✗ אין תשובה מהשער ב-$HOST:$GATE_PORT (השירות לא רץ, או שהפורט חסום בדרך)." >&2; exit 1 ;;
+  *)       echo "✗ תשובה לא צפויה מהשער: $reply" >&2; exit 1 ;;
+esac
