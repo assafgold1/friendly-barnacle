@@ -2,10 +2,10 @@
 # Axiom OTP gate — runs on the Proxmox host and installs the gate inside a Windows VM
 # through the QEMU guest agent.
 #
-#   bash <(curl -s https://raw.githubusercontent.com/assafgold1/axiom-otp-gate/main/install.sh) <vmid>              install + QR link
-#   bash <(curl -s https://raw.githubusercontent.com/assafgold1/axiom-otp-gate/main/install.sh) <vmid> status
-#   bash <(curl -s https://raw.githubusercontent.com/assafgold1/axiom-otp-gate/main/install.sh) <vmid> lockdown     close RDP except through the gate
-#   bash <(curl -s https://raw.githubusercontent.com/assafgold1/axiom-otp-gate/main/install.sh) <vmid> uninstall
+#   bash <(curl -s https://raw.githubusercontent.com/assafgold1/friendly-barnacle/main/install.sh) <vmid>              install + QR link
+#   bash <(curl -s https://raw.githubusercontent.com/assafgold1/friendly-barnacle/main/install.sh) <vmid> status
+#   bash <(curl -s https://raw.githubusercontent.com/assafgold1/friendly-barnacle/main/install.sh) <vmid> lockdown     close RDP except through the gate
+#   bash <(curl -s https://raw.githubusercontent.com/assafgold1/friendly-barnacle/main/install.sh) <vmid> uninstall
 set -euo pipefail
 
 REPO_RAW="${AXIOM_REPO_RAW:-https://raw.githubusercontent.com/assafgold1/friendly-barnacle/main}"
@@ -40,6 +40,9 @@ guest() {
 
 gate() { guest powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$REMOTE_SCRIPT" "$@"; }
 
+# Writes a file inside the VM through the Proxmox API (qm has no file-write command)
+put_file() { pvesh create "/nodes/$(hostname -s)/qemu/$VMID/agent/file-write" --file "$1" --content "$2" >/dev/null; }
+
 install_gate() {
   step "Downloading the gate script"
   local ps1
@@ -47,12 +50,12 @@ install_gate() {
 
   step "Copying it into VM $VMID"
   guest cmd.exe /c "if not exist $REMOTE_DIR mkdir $REMOTE_DIR" >/dev/null
-  qm guest file-write "$VMID" "$REMOTE_SCRIPT" "$ps1"
+  put_file "$REMOTE_SCRIPT" "$ps1"
 
   # The secret is created here and written straight into the VM; it never touches disk on the host
   local secret
   secret=$(head -c 20 /dev/urandom | base32 | tr -d '=\n')
-  qm guest file-write "$VMID" "$REMOTE_DIR\\secret.txt" "$secret"
+  put_file "$REMOTE_DIR\\secret.txt" "$secret"
 
   step "Installing the gate service in Windows"
   gate -Install -Unattended -GatePort "$GATE_PORT" || die "Install failed inside the VM (see output above)."
