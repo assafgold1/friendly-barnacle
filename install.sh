@@ -8,7 +8,7 @@
 #   bash <(curl -s https://raw.githubusercontent.com/assafgold1/axiom-otp-gate/main/install.sh) <vmid> uninstall
 set -euo pipefail
 
-REPO_RAW="${AXIOM_REPO_RAW:-https://raw.githubusercontent.com/assafgold1/axiom-otp-gate/main}"
+REPO_RAW="${AXIOM_REPO_RAW:-https://raw.githubusercontent.com/assafgold1/friendly-barnacle/main}"
 QR_URL="${AXIOM_QR_URL:-http://otp.axiom.taninoni.com:9911}"
 VMID="${1:-${VPSID:-}}"
 ACTION="${2:-install}"
